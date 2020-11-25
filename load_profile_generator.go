@@ -38,19 +38,19 @@ func overwriteFileContent(filePath string, newContent string) error {
 
 func createLoadProfile(l *loadProfile, loadStepPattern string) string {
 	var stdout strings.Builder
-	for i := 0; i < numSteps; i++ {
+	for i := 0; i < l.numSteps; i++ {
 		var prev int
 		var next int
 		if i == 0 {
-			prev = initLoad
-			next = initLoad + increment
+			prev = l.initLoad
+			next = l.initLoad + l.increment
 		} else {
-			prev = initLoad + (increment * i)
-			next = prev + increment
+			prev = l.initLoad + (l.increment * i)
+			next = prev + l.increment
 		}
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, rampUpPropName, rampUp))
+		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, l.rampUpPropName, l.rampUp))
 		stdout.WriteString("\n")
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, stepDurationPropName, stepDuration))
+		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, l.stepDurationPropName, l.stepDuration))
 		stdout.WriteString("\n")
 	}
 	stdout.WriteString(`          </collectionProp>`)
@@ -135,7 +135,7 @@ func main() {
 
 	loadStepPattern := getLoadStepPattern()
 
-	newLoadProfile := createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps, loadStepPattern)
+	newLoadProfile := createLoadProfile(loadP, loadStepPattern)
 	loadProfMatcher := regexp.MustCompile(`\<collectionProp name="[^load_profile]*"\>(\s*|.*)*\<\/kg`) // `<collectionProp name="[^load_profile]">(.|\s)*?<\/kg`
 
 	newContent := loadProfMatcher.ReplaceAllLiteralString(oldContent, newLoadProfile)
