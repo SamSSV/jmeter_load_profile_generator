@@ -36,7 +36,8 @@ func overwriteFileContent(filePath string, newContent string) error {
 	return err
 }
 
-func createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps int, loadStepPattern string, stdout strings.Builder) string {
+func createLoadProfile(l *loadProfile, loadStepPattern string) string {
+	var stdout strings.Builder
 	for i := 0; i < numSteps; i++ {
 		var prev int
 		var next int
@@ -85,19 +86,33 @@ func getLoadStepPattern() string {
 	return builder.String()
 }
 
+type loadProfile struct {
+	jmxPath              string
+	initLoad             int
+	increment            int
+	rampUp               int
+	stepDuration         int
+	numSteps             int
+	rampUpPropName       int
+	stepDurationPropName int
+	totalTestDuration    int
+}
+
 func main() {
 
 	inputArgs := getInputArgs()
 
-	jmxPath := "NOT_FOUND"
-	initLoad := 0
-	increment := 0
-	rampUp := 0
-	stepDuration := 0
-	numSteps := 0
-	rampUpPropName := 1000000
-	stepDurationPropName := 1000000
-	totalTestDuration := 0
+	loadP := loadProfile{
+		jmxPath:              "NOT_FOUND",
+		initLoad:             0,
+		increment:            0,
+		rampUp:               0,
+		stepDuration:         0,
+		numSteps:             0,
+		rampUpPropName:       1000000,
+		stepDurationPropName: 1000000,
+		totalTestDuration:    0,
+	}
 
 	switch len(inputArgs) {
 	case 1, 2, 3, 4, 5:
@@ -105,32 +120,31 @@ func main() {
 		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
 		os.Exit(0)
 	case 6:
-		jmxPath = inputArgs[0]
-		initLoad, _ = strconv.Atoi(inputArgs[1])
-		increment, _ = strconv.Atoi(inputArgs[2])
-		rampUp, _ = strconv.Atoi(inputArgs[3])
-		rampUpPropName += rampUp
-		stepDuration, _ = strconv.Atoi(inputArgs[4])
-		stepDurationPropName += stepDuration
-		numSteps, _ = strconv.Atoi(inputArgs[5])
-		totalTestDuration = numSteps*(rampUp+stepDuration) + 5
+		loadP.jmxPath = inputArgs[0]
+		loadP.initLoad, _ = strconv.Atoi(inputArgs[1])
+		loadP.increment, _ = strconv.Atoi(inputArgs[2])
+		loadP.rampUp, _ = strconv.Atoi(inputArgs[3])
+		loadP.rampUpPropName = loadP.rampUpPropName + loadP.rampUp
+		loadP.stepDuration, _ = strconv.Atoi(inputArgs[4])
+		loadP.stepDurationPropName = loadP.stepDurationPropName + loadP.stepDuration
+		loadP.numSteps, _ = strconv.Atoi(inputArgs[5])
+		loadP.totalTestDuration = loadP.numSteps*(loadP.rampUp+loadP.stepDuration) + 5
 	}
 
-	content, _ := readFileContent(jmxPath)
+	oldContent, _ := readFileContent(loadP.jmxPath)
 
 	loadStepPattern := getLoadStepPattern()
 
-	var stdout strings.Builder
-
-	newLoadProfile := createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps, loadStepPattern, stdout)
-
+	newLoadProfile := createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps, loadStepPattern)
 	loadProfMatcher := regexp.MustCompile(`\<collectionProp name="[^load_profile]*"\>(\s*|.*)*\<\/kg`) // `<collectionProp name="[^load_profile]">(.|\s)*?<\/kg`
-	newContent := loadProfMatcher.ReplaceAllLiteralString(content, newLoadProfile)
+
+	newContent := loadProfMatcher.ReplaceAllLiteralString(oldContent, newLoadProfile)
 
 	loadProfDurationPattern := `<stringProp name="Hold">%d</stringProp>`
 	loadProfDurationMatcher := regexp.MustCompile(`<stringProp name="Hold">(\d*?)<\/stringProp>`)
+
 	newContent = loadProfDurationMatcher.ReplaceAllLiteralString(newContent, fmt.Sprintf(loadProfDurationPattern, totalTestDuration))
-	fmt.Println(newContent)
+	//fmt.Println(newContent)
 	overwriteFileContent(jmxPath, newContent)
 
 }
