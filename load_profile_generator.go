@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -11,33 +12,40 @@ import (
 	"time"
 )
 
-func readFileContent(filePath string) (string, error) {
+const loadStepPattern = `            <collectionProp name="%d">
+		<stringProp name="%d">%d</stringProp>
+		<stringProp name="%d">%d</stringProp>
+		<stringProp name="%d">%d</stringProp>
+	    </collectionProp>`
+
+func readFileContent(filePath string) ([]byte, error) {
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("failed reading file [%s]: %s", filePath, err)
+		return nil, fmt.Errorf("failed reading file [%s]: %w", filePath, err)
 	}
-	return string(content), err
+
+	return content, nil
 }
 
-func overwriteFileContent(filePath string, newContent string) error {
-	file, err := os.OpenFile(filePath, os.O_RDWR, 0777)
-
+func overwriteFileContent(filePath string, newContent []byte) error {
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		log.Fatalf("failed opening file: %s", err)
+		return fmt.Errorf("failed opening file: %w", err)
 	}
 	defer file.Close()
 
-	len, err := file.WriteAt([]byte(newContent), 0) // Write at 0 beginning
+	len, err := file.Write(newContent)
 	if err != nil {
-		log.Fatalf("failed writing to file: %s", err)
+		return fmt.Errorf("failed writing to file: %w", err)
 	}
-	fmt.Printf("\nLength: %d bytes", len)
-	fmt.Printf("\nFile Name: %s\n", file.Name())
-	return err
+	fmt.Printf("\nLength: %d bytes\n", len)
+	fmt.Printf("File Name: %s\n", file.Name())
+
+	return nil
 }
 
-func createLoadProfile(l loadProfile, loadStepPattern string) string {
-	var stdout strings.Builder
+func createLoadProfile(l loadProfile) string {
+	var output strings.Builder
 	for i := 0; i < l.numSteps; i++ {
 		var prev int
 		var next int
@@ -48,62 +56,61 @@ func createLoadProfile(l loadProfile, loadStepPattern string) string {
 			prev = l.initLoad + (l.increment * i)
 			next = prev + l.increment
 		}
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, l.rampUpPropName, l.rampUp))
-		stdout.WriteString("\n")
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, l.stepDurationPropName, l.stepDuration))
-		stdout.WriteString("\n")
+		output.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, l.rampUpPropName, l.rampUp))
+		output.WriteString("\n")
+		output.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, l.stepDurationPropName, l.stepDuration))
+		output.WriteString("\n")
 	}
-	stdout.WriteString(`          </collectionProp>`)
-	stdout.WriteString("\n")
-	stdout.WriteString(`      	</kg`)
-	return stdout.String()
+	output.WriteString(`          </collectionProp>\n      	</kg`)
+
+	return output.String()
 }
 
-func getInputArgs() []string {
-	argsString := ""
-	if len(os.Args) > 1 {
-		argsString = strings.Join(os.Args[1:], " ")
-	} else {
-		fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
-		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
-		os.Exit(0)
-	}
-	args := strings.Split(argsString, " ")
-	return args
+func printHelp() {
+	fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
+	fmt.Println("Args example: path/to/test.jmx 10,10,60,180,3")
+	fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps values must be gt 0")
 }
 
-func getLoadStepPattern() string {
-	var builder strings.Builder
-	builder.WriteString(`            <collectionProp name="%d">`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`	    </collectionProp>`)
-	return builder.String()
+func getInputArgs() (string, []string, error) {
+	const profileVarsAmount = 5
+	var numericPattern = regexp.MustCompile(`^\d+$`)
+
+	if len(os.Args) <= 2 {
+		printHelp()
+
+		return "", nil, errors.New("Invalid input arguments")
+	}
+
+	path := os.Args[1]
+	values := strings.Split(os.Args[2], ",")
+
+	// validate input profile values
+	if len(values) != profileVarsAmount {
+		printHelp()
+
+		return "", nil, fmt.Errorf("Invalid amount of profile values: %d, %d required", len(values), profileVarsAmount)
+	}
+	for _, val := range values {
+		if !numericPattern.MatchString(val) || val == "0" {
+			printHelp()
+
+			return "", nil, errors.New("Invalid input data for profile values")
+		}
+	}
+
+	return path, values, nil
 }
 
-func assignLoadProfileParams(inputArgs []string, l *loadProfile) {
-	switch len(inputArgs) {
-	case 1, 2, 3, 4, 5:
-		fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
-		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
-		os.Exit(0)
-	case 6:
-		l.jmxPath = inputArgs[0]
-		fmt.Println(l.jmxPath)
-		l.initLoad, _ = strconv.Atoi(inputArgs[1])
-		l.increment, _ = strconv.Atoi(inputArgs[2])
-		l.rampUp, _ = strconv.Atoi(inputArgs[3])
-		l.rampUpPropName = l.rampUpPropName + l.rampUp
-		l.stepDuration, _ = strconv.Atoi(inputArgs[4])
-		l.stepDurationPropName = l.stepDurationPropName + l.stepDuration
-		l.numSteps, _ = strconv.Atoi(inputArgs[5])
-		l.totalTestDuration = l.numSteps*(l.rampUp+l.stepDuration) + 5
-	}
+func assignLoadProfileParams(values []string, lp *loadProfile) {
+	lp.initLoad, _ = strconv.Atoi(values[0])
+	lp.increment, _ = strconv.Atoi(values[1])
+	lp.rampUp, _ = strconv.Atoi(values[2])
+	lp.rampUpPropName = lp.rampUpPropName + lp.rampUp
+	lp.stepDuration, _ = strconv.Atoi(values[3])
+	lp.stepDurationPropName = lp.stepDurationPropName + lp.stepDuration
+	lp.numSteps, _ = strconv.Atoi(values[4])
+	lp.totalTestDuration = lp.numSteps*(lp.rampUp+lp.stepDuration) + 5
 }
 
 type loadProfile struct {
@@ -120,39 +127,34 @@ type loadProfile struct {
 
 func main() {
 
-	inputArgs := getInputArgs()
-
-	loadP := loadProfile{
-		jmxPath:              "NOT_FOUND",
-		initLoad:             0,
-		increment:            0,
-		rampUp:               0,
-		stepDuration:         0,
-		numSteps:             0,
-		rampUpPropName:       1000000,
-		stepDurationPropName: 1000000,
-		totalTestDuration:    0,
+	path, values, err := getInputArgs()
+	if err != nil {
+		log.Fatalln(err)
 	}
 
-	assignLoadProfileParams(inputArgs, &loadP)
+	loadP := loadProfile{jmxPath: path}
+
+	assignLoadProfileParams(values, &loadP)
 
 	fmt.Println(loadP.jmxPath)
 
-	oldContent, _ := readFileContent(loadP.jmxPath)
+	oldContent, err := readFileContent(loadP.jmxPath)
+	if err != nil {
+		log.Fatalln(err)
+	}
 
-	loadStepPattern := getLoadStepPattern()
-
-	newLoadProfile := createLoadProfile(loadP, loadStepPattern)
+	newLoadProfile := createLoadProfile(loadP)
 	loadProfMatcher := regexp.MustCompile(`\<collectionProp name="[^load_profile]*"\>(\s*|.*)*\<\/kg`) // `<collectionProp name="[^load_profile]">(.|\s)*?<\/kg`
 
-	newContent := loadProfMatcher.ReplaceAllLiteralString(oldContent, newLoadProfile)
+	newContent := loadProfMatcher.ReplaceAllLiteral(oldContent, []byte(newLoadProfile))
 
 	loadProfDurationPattern := `<stringProp name="Hold">%d</stringProp>`
 	loadProfDurationMatcher := regexp.MustCompile(`<stringProp name="Hold">(\d*?)<\/stringProp>`)
 
-	newContent = loadProfDurationMatcher.ReplaceAllLiteralString(newContent, fmt.Sprintf(loadProfDurationPattern, loadP.totalTestDuration))
+	newContent = loadProfDurationMatcher.ReplaceAllLiteral(newContent, []byte(fmt.Sprintf(loadProfDurationPattern, loadP.totalTestDuration)))
 	//fmt.Println(newContent)
-	overwriteFileContent(loadP.jmxPath, newContent)
-
+	err = overwriteFileContent(loadP.jmxPath, newContent)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
-
