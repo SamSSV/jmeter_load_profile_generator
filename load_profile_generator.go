@@ -36,12 +36,58 @@ func overwriteFileContent(filePath string, newContent string) error {
 	return err
 }
 
-func main() {
-	inputArgsStr := "1 5 60 180 10"
-	if len(os.Args) > 1 {
-		inputArgsStr = strings.Join(os.Args[1:], " ")
+func createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps int, loadStepPattern string, stdout strings.Builder) string {
+	for i := 0; i < numSteps; i++ {
+		var prev int
+		var next int
+		if i == 0 {
+			prev = initLoad
+			next = initLoad + increment
+		} else {
+			prev = initLoad + (increment * i)
+			next = prev + increment
+		}
+		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, rampUpPropName, rampUp))
+		stdout.WriteString("\n")
+		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, stepDurationPropName, stepDuration))
+		stdout.WriteString("\n")
 	}
-	inputArgs := strings.Split(inputArgsStr, " ")
+	stdout.WriteString(`          </collectionProp>`)
+	stdout.WriteString("\n")
+	stdout.WriteString(`      	</kg`)
+	return stdout.String()
+}
+
+func getInputArgs() []string {
+	argsString := ""
+	if len(os.Args) > 1 {
+		argsString = strings.Join(os.Args[1:], " ")
+	} else {
+		fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
+		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
+		os.Exit(0)
+	}
+	args := strings.Split(argsString, " ")
+	return args
+}
+
+func getLoadStepPattern() string {
+	var builder strings.Builder
+	builder.WriteString(`            <collectionProp name="%d">`)
+	builder.WriteString("\n")
+	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
+	builder.WriteString("\n")
+	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
+	builder.WriteString("\n")
+	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
+	builder.WriteString("\n")
+	builder.WriteString(`	    </collectionProp>`)
+	return builder.String()
+}
+
+func main() {
+
+	inputArgs := getInputArgs()
 
 	jmxPath := "NOT_FOUND"
 	initLoad := 0
@@ -72,44 +118,15 @@ func main() {
 
 	content, _ := readFileContent(jmxPath)
 
-	//fmt.Println(content)
+	loadStepPattern := getLoadStepPattern()
 
-	var builder strings.Builder
-	builder.WriteString(`            <collectionProp name="%d">`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`		<stringProp name="%d">%d</stringProp>`)
-	builder.WriteString("\n")
-	builder.WriteString(`	    </collectionProp>`)
-
-	loadStepPattern := builder.String()
 	var stdout strings.Builder
 
-	for i := 0; i < numSteps; i++ {
-		var prev int
-		var next int
-		if i == 0 {
-			prev = initLoad
-			next = initLoad + increment
-		} else {
-			prev = initLoad + (increment * i)
-			next = prev + increment
-		}
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), prev, prev, next, next, rampUpPropName, rampUp))
-		stdout.WriteString("\n")
-		stdout.WriteString(fmt.Sprintf(loadStepPattern, time.Now().UnixNano(), next, next, next, next, stepDurationPropName, stepDuration))
-		stdout.WriteString("\n")
-	}
-	stdout.WriteString(`          </collectionProp>`)
-	stdout.WriteString("\n")
-	stdout.WriteString(`      	</kg`)
+	newLoadProfile := createLoadProfile(initLoad, increment, rampUp, rampUpPropName, stepDuration, stepDurationPropName, numSteps, loadStepPattern, stdout)
 
 	loadProfMatcher := regexp.MustCompile(`\<collectionProp name="[^load_profile]*"\>(\s*|.*)*\<\/kg`) // `<collectionProp name="[^load_profile]">(.|\s)*?<\/kg`
-	newContent := loadProfMatcher.ReplaceAllLiteralString(content, stdout.String())
-	//fmt.Println(newContent)
+	newContent := loadProfMatcher.ReplaceAllLiteralString(content, newLoadProfile)
+
 	loadProfDurationPattern := `<stringProp name="Hold">%d</stringProp>`
 	loadProfDurationMatcher := regexp.MustCompile(`<stringProp name="Hold">(\d*?)<\/stringProp>`)
 	newContent = loadProfDurationMatcher.ReplaceAllLiteralString(newContent, fmt.Sprintf(loadProfDurationPattern, totalTestDuration))
