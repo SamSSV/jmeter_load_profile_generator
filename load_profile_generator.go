@@ -36,7 +36,7 @@ func overwriteFileContent(filePath string, newContent string) error {
 	return err
 }
 
-func createLoadProfile(l *loadProfile, loadStepPattern string) string {
+func createLoadProfile(l loadProfile, loadStepPattern string) string {
 	var stdout strings.Builder
 	for i := 0; i < l.numSteps; i++ {
 		var prev int
@@ -86,6 +86,26 @@ func getLoadStepPattern() string {
 	return builder.String()
 }
 
+func assignLoadProfileParams(inputArgs []string, l *loadProfile) {
+	switch len(inputArgs) {
+	case 1, 2, 3, 4, 5:
+		fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
+		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
+		os.Exit(0)
+	case 6:
+		l.jmxPath = inputArgs[0]
+		fmt.Println(l.jmxPath)
+		l.initLoad, _ = strconv.Atoi(inputArgs[1])
+		l.increment, _ = strconv.Atoi(inputArgs[2])
+		l.rampUp, _ = strconv.Atoi(inputArgs[3])
+		l.rampUpPropName = l.rampUpPropName + l.rampUp
+		l.stepDuration, _ = strconv.Atoi(inputArgs[4])
+		l.stepDurationPropName = l.stepDurationPropName + l.stepDuration
+		l.numSteps, _ = strconv.Atoi(inputArgs[5])
+		l.totalTestDuration = l.numSteps*(l.rampUp+l.stepDuration) + 5
+	}
+}
+
 type loadProfile struct {
 	jmxPath              string
 	initLoad             int
@@ -114,22 +134,9 @@ func main() {
 		totalTestDuration:    0,
 	}
 
-	switch len(inputArgs) {
-	case 1, 2, 3, 4, 5:
-		fmt.Println("set next args: jmxPath, initLoad,increment,rampUp,stepDuration,numSteps")
-		fmt.Println("initLoad,increment,rampUp,stepDuration,numSteps must be gt 0")
-		os.Exit(0)
-	case 6:
-		loadP.jmxPath = inputArgs[0]
-		loadP.initLoad, _ = strconv.Atoi(inputArgs[1])
-		loadP.increment, _ = strconv.Atoi(inputArgs[2])
-		loadP.rampUp, _ = strconv.Atoi(inputArgs[3])
-		loadP.rampUpPropName = loadP.rampUpPropName + loadP.rampUp
-		loadP.stepDuration, _ = strconv.Atoi(inputArgs[4])
-		loadP.stepDurationPropName = loadP.stepDurationPropName + loadP.stepDuration
-		loadP.numSteps, _ = strconv.Atoi(inputArgs[5])
-		loadP.totalTestDuration = loadP.numSteps*(loadP.rampUp+loadP.stepDuration) + 5
-	}
+	assignLoadProfileParams(inputArgs, &loadP)
+
+	fmt.Println(loadP.jmxPath)
 
 	oldContent, _ := readFileContent(loadP.jmxPath)
 
@@ -143,8 +150,9 @@ func main() {
 	loadProfDurationPattern := `<stringProp name="Hold">%d</stringProp>`
 	loadProfDurationMatcher := regexp.MustCompile(`<stringProp name="Hold">(\d*?)<\/stringProp>`)
 
-	newContent = loadProfDurationMatcher.ReplaceAllLiteralString(newContent, fmt.Sprintf(loadProfDurationPattern, totalTestDuration))
+	newContent = loadProfDurationMatcher.ReplaceAllLiteralString(newContent, fmt.Sprintf(loadProfDurationPattern, loadP.totalTestDuration))
 	//fmt.Println(newContent)
-	overwriteFileContent(jmxPath, newContent)
+	overwriteFileContent(loadP.jmxPath, newContent)
 
 }
+
